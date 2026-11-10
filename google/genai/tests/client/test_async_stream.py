@@ -16,12 +16,15 @@
 """Tests for async stream."""
 
 import asyncio
+import io
+import json
 from typing import List
 from unittest import mock
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 import pytest
+import requests
 
 
 try:
@@ -179,6 +182,52 @@ def test_httpx_multiline_data_sync(responses: api_client.HttpResponse) -> None:
   results = list(responses._iter_response_stream())
 
   assert results == ["{\n  'message': 'hello'\n}"]
+
+
+def test_requests_sse_stream_without_charset_decodes_as_utf8() -> None:
+  expected = "café"
+  payload = json.dumps({"text": expected}, ensure_ascii=False).encode("utf-8")
+
+  resp = requests.Response()
+  resp.status_code = 200
+  resp.headers["Content-Type"] = "text/event-stream"
+  # Matches what requests.adapters.HTTPAdapter.build_response() sets -> 'ISO-8859-1'
+  resp.encoding = requests.utils.get_encoding_from_headers(resp.headers)
+  resp.raw = io.BytesIO(b"data: " + payload + b"\n\n")
+
+  chunk = next(api_client.HttpResponse(resp.headers, resp).segments())
+  assert chunk["text"] == expected, (
+      f"Expected {expected!r}, got {chunk['text']!r}"
+  )
+
+
+def test_requests_stream_with_none_encoding_decodes_as_utf8() -> None:
+  expected = "café"
+  payload = json.dumps({"text": expected}, ensure_ascii=False).encode("utf-8")
+
+  resp = requests.Response()
+  resp.status_code = 200
+  resp.encoding = None
+  resp.raw = io.BytesIO(b"data: " + payload + b"\n\n")
+
+  chunk = next(api_client.HttpResponse(resp.headers, resp).segments())
+  assert chunk["text"] == expected
+
+
+def test_requests_sse_stream_multibyte_utf8_across_chunk_boundary() -> None:
+  # Place a 4-byte UTF-8 sequence ("🎉") across requests' 512-byte chunk size.
+  prefix = "a" * (requests.models.ITER_CHUNK_SIZE - len('data: {"text": "') - 1)
+  expected = prefix + "🎉"
+  payload = json.dumps({"text": expected}, ensure_ascii=False).encode("utf-8")
+
+  resp = requests.Response()
+  resp.status_code = 200
+  resp.headers["Content-Type"] = "text/event-stream"
+  resp.encoding = requests.utils.get_encoding_from_headers(resp.headers)
+  resp.raw = io.BytesIO(b"data: " + payload + b"\n\n")
+
+  chunk = next(api_client.HttpResponse(resp.headers, resp).segments())
+  assert chunk["text"] == expected
 
 
 @pytest.mark.asyncio

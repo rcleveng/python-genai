@@ -512,9 +512,15 @@ class HttpResponse:
     balance = 0
     data_buffer: list[str] = []
     if isinstance(self.response_stream, _HTTPX_RESPONSE_TYPES):
-      response_stream = self.response_stream.iter_lines()
+      response_stream: Iterator[str] = self.response_stream.iter_lines()
     else:
-      response_stream = self.response_stream.iter_lines(decode_unicode=True)
+      # Decode raw bytes as UTF-8 rather than iter_lines(decode_unicode=True),
+      # since requests defaults text/event-stream without charset to ISO-8859-1
+      # and yields raw bytes when resp.encoding is None.
+      response_stream = (
+          line.decode('utf-8') if isinstance(line, bytes) else line
+          for line in self.response_stream.iter_lines()
+      )
     for line in response_stream:
       if not line:
         if data_buffer:
