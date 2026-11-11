@@ -641,6 +641,40 @@ def test_process_schema_with_cycle(client):
 
 
 @pytest.mark.parametrize('use_vertex', [True, False])
+def test_process_schema_with_recursive_union(client):  # pylint: disable=redefined-outer-name
+  """Tests process_schema resolves recursive anyOf unions per path."""
+  schema = {
+      '$ref': '#/$defs/Node',
+      '$defs': {
+          'Leaf': {
+              'type': 'OBJECT',
+              'properties': {'value': {'type': 'INTEGER'}},
+          },
+          'UnaryOp': {
+              'type': 'OBJECT',
+              'properties': {'operand': {'$ref': '#/$defs/Node'}},
+          },
+          'Node': {
+              'anyOf': [
+                  {'$ref': '#/$defs/Leaf'},
+                  {'$ref': '#/$defs/UnaryOp'},
+              ],
+          },
+      },
+  }
+
+  _transformers.process_schema(schema, client)
+
+  expected = {
+      'anyOf': [
+          {'type': 'OBJECT', 'properties': {'value': {'type': 'INTEGER'}}},
+          {'type': 'OBJECT', 'properties': {'operand': {}}},
+      ],
+  }
+  assert schema == expected
+
+
+@pytest.mark.parametrize('use_vertex', [True, False])
 def test_t_schema_does_not_change_property_ordering_if_set(client):
   """Tests t_schema doesn't overwrite the property_ordering field if already set."""
 
